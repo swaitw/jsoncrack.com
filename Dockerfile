@@ -1,10 +1,22 @@
-# Builder
-FROM node:16-alpine as builder
-WORKDIR /src
-COPY . /src/
-RUN yarn install --frozen-lockfile && yarn build
+FROM node:lts-alpine AS base
 
-# App
-FROM nginxinc/nginx-unprivileged
-COPY --chown=nginx:nginx --from=builder /src/out /app
-COPY default.conf /etc/nginx/conf.d/default.conf
+# Stage 1: Install dependencies
+FROM base AS deps
+WORKDIR /app
+COPY package.json pnpm-lock.yaml ./
+RUN corepack enable pnpm && pnpm install --frozen-lockfile
+
+# Stage 2: Build the application
+FROM base AS builder
+WORKDIR /app
+COPY --from=deps /app/node_modules ./node_modules
+COPY . .
+RUN corepack enable pnpm && pnpm run build
+
+# Stage 3: Production image
+FROM nginxinc/nginx-unprivileged:stable AS production
+WORKDIR /app
+COPY --from=builder /app/out /app
+COPY ./nginx.conf /etc/nginx/conf.d/default.conf
+
+EXPOSE 8080
